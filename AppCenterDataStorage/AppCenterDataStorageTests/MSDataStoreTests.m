@@ -11,35 +11,38 @@
 
 #import "MSChannelGroupProtocol.h"
 #import "MSChannelUnitProtocol.h"
+#import "MSCosmosDb.h"
 #import "MSDataStore.h"
 #import "MSDataStoreInternal.h"
-#import "MSTestFrameworks.h"
-#import "MSUserIdContextPrivate.h"
-#import "MSDataStore.h"
-#import "MSSerializableDocument.h"
 #import "MSDocumentWrapper.h"
-#import "MSWriteOptions.h"
 #import "MSPage.h"
+#import "MSSerializableDocument.h"
+#import "MSTestFrameworks.h"
+#import "MSTokenExchange.h"
+#import "MSTokenResult.h"
+#import "MSTokensResponse.h"
+#import "MSUserIdContextPrivate.h"
+#import "MSWriteOptions.h"
 
 @interface MSDataStore (Test)
 
 + (instancetype)sharedInstance;
 
 + (void)createWithPartition:(NSString *)partition
-                                documentId:(NSString *)documentId
-                                document:(id<MSSerializableDocument>)document
-                                completionHandler:(MSDocumentWrapperCompletionHandler)completionHandler;
+                 documentId:(NSString *)documentId
+                   document:(id<MSSerializableDocument>)document
+          completionHandler:(MSDocumentWrapperCompletionHandler)completionHandler;
 
 + (void)createWithPartition:(NSString *)partition
-                                documentId:(NSString *)documentId
-                                document:(id<MSSerializableDocument>)document
-                                writeOptions:(MSWriteOptions *)writeOptions
-                                completionHandler:(MSDocumentWrapperCompletionHandler)completionHandler;
+                 documentId:(NSString *)documentId
+                   document:(id<MSSerializableDocument>)document
+               writeOptions:(MSWriteOptions *)writeOptions
+          completionHandler:(MSDocumentWrapperCompletionHandler)completionHandler;
 
 + (void)deleteDocumentWithPartition:(NSString *)partition
-                                documentId:(NSString *)documentId
-                                writeOptions:(MSWriteOptions *)__unused writeOptions
-                                completionHandler:(MSDataSourceErrorCompletionHandler)completionHandler;
+                         documentId:(NSString *)documentId
+                       writeOptions:(MSWriteOptions *)__unused writeOptions
+                  completionHandler:(MSDataSourceErrorCompletionHandler)completionHandler;
 @end
 
 @interface MSDataStoreTests : XCTestCase
@@ -49,87 +52,71 @@
 @implementation MSDataStoreTests
 
 - (void)setUp {
-  [super setUp];
+    [super setUp];
 }
 
 - (void)tearDown {
-  [super tearDown];
+    [super tearDown];
 }
 
 - (void)testCreateWithPartitionWithoutWriteOptionsGoldenTest {
     
-    //If
+    // If
     NSString *partition = @"partition";
     NSString *documentId = @"documentId";
-    NSDictionary *docDic = @{@"testKey" : @"testValue"};
-   
+    NSString *httpMethod = @"POST";
+    NSData *body = nil;
+    NSDictionary *additionalHeaders = nil;
     id mockSerializableDocument = OCMProtocolMock(@protocol(MSSerializableDocument));
-    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn(docDic);
-
-     __block BOOL completionHandlerCalled = NO;
-    XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
-    MSDocumentWrapperCompletionHandler completionHandler = ^(MSDocumentWrapper *data) {
-        completionHandlerCalled = YES;
+    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn([NSDictionary new]);
+    
+    // Mock tokens fetching.
+    MSTokensResponse *testTokensResponse = [[MSTokensResponse alloc] initWithTokens:@ [[MSTokenResult new]]];
+    id tokenExchangeMock = OCMClassMock([MSTokenExchange class]);
+    OCMStub([tokenExchangeMock performDbTokenAsyncOperationWithHttpClient:OCMOCK_ANY partition:OCMOCK_ANY completionHandler:OCMOCK_ANY])
+    .andDo(^(NSInvocation *invocation) {
+        MSGetTokenAsyncCompletionHandler getTokenCallback;
+        [invocation retainArguments];
+        [invocation getArgument:&getTokenCallback atIndex:4];
+        getTokenCallback(testTokensResponse, nil);
+    });
+    
+    // Mock CosmosDB requests.
+    NSData *testResponse = nil;
+    OCMStub([MSCosmosDb
+             performCosmosDbAsyncOperationWithHttpClient:OCMOCK_ANY
+             tokenResult:OCMOCK_ANY
+             documentId:documentId
+             httpMethod:httpMethod
+             body:body // we need to double check what body is allowed here, defined as nil for now
+             additionalHeaders:additionalHeaders // the same for headers, but we have a reference here and need
+             // to check values using [OCMArg checkWithBlock]
+             completionHandler:OCMOCK_ANY])
+    .andDo(^(NSInvocation *invocation) {
+        MSCosmosDbCompletionHandler cosmosdbOperationCallback;
+        [invocation retainArguments];
+        [invocation getArgument:&getTokenCallback atIndex:8];
+        cosmosdbOperationCallback(testResponse, nil);
+    });
+    
+    //__block BOOL completionHandlerCalled = NO;
+    
+    __block XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
+    MSDocumentWrapperCompletionHandler completionHandler = ^(__unused MSDocumentWrapper *data) {
+        // completionHandlerCalled = YES;
         [completionHandler fulfill];
     };
     
     // When
-    [MSDataStore createWithPartition:partition
-                          documentId:documentId
-                            document:mockSerializableDocument
-                   completionHandler:completionHandler];
-    
-    [self waitForExpectationsWithTimeout:5
-                                handler:^(NSError *error) {
-                                    XCTAssertTrue(completionHandler);
-                                    if (error) {
-                                        XCTFail(@"Expectation Failed with error: %@", error);
-                                    }
-                                }];
+    [MSDataStore createWithPartition:partition documentId:documentId document:mockSerializableDocument completionHandler:completionHandler];
     
     // Then
-    XCTAssertTrue([completeExpectation assertForOverFulfill]);
-    XCTAssertTrue(completionHandlerCalled);
-    
+    [self waitForExpectationsWithTimeout:5 handler:nil];
 }
 
 - (void)testCreateWithPartitionWithWriteOptionsGoldenTest {
     
-    //If
-    NSString *partition = @"partition";
-    NSString *documentId = @"documentId";
-    NSDictionary *docDic = @{@"testKey" : @"testValue"};
-    MSWriteOptions *options = [MSWriteOptions new];
-    
-    id mockSerializableDocument = OCMProtocolMock(@protocol(MSSerializableDocument));
-    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn(docDic);
-    
-    __block BOOL completionHandlerCalled = NO;
-    XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
-    MSDocumentWrapperCompletionHandler completionHandler = ^(__unused MSDocumentWrapper *data) {
-        completionHandlerCalled = YES;
-        [completeExpectation fulfill];
-    };
-    
-    // When
-    [MSDataStore createWithPartition:partition
-                          documentId:documentId
-                            document:mockSerializableDocument
-                        writeOptions:options
-                   completionHandler:completionHandler];
-    
-    [self waitForExpectationsWithTimeout:30
-                                 handler:nil];
-    
-    // Then
-    XCTAssertTrue([completeExpectation assertForOverFulfill]);
-    XCTAssertTrue(completionHandlerCalled);
-    
-}
-
-- (void)testCreateWithPartitionExchangeFailed {
-    
-    //If
+    // If
     NSString *partition = @"partition";
     NSString *documentId = @"documentId";
     MSWriteOptions *options = [MSWriteOptions new];
@@ -141,7 +128,7 @@
     XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
     MSDocumentWrapperCompletionHandler completionHandler = ^(MSDocumentWrapper *data) {
         completionHandlerCalled = YES;
-        [completeExpectation fulfill];
+        [completionHandler fulfill];
     };
     
     // When
@@ -151,15 +138,14 @@
                         writeOptions:options
                    completionHandler:completionHandler];
     
-    [self waitForExpectationsWithTimeout:5
-                                 handler:nil];
+    [self waitForExpectationsWithTimeout:5 handler:nil];
     
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
     XCTAssertTrue(completionHandlerCalled);
 }
 
-- (void) testDeleteDocumentWithPartitionWithoutWriteOptions {
+- (void)testDeleteDocumentWithPartitionWithoutWriteOptions {
     
     // If
     NSString *partition = @"partition";
@@ -173,25 +159,16 @@
     };
     
     // When
-    [MSDataStore deleteDocumentWithPartition:partition
-                                            documentId:documentId
-                                            completionHandler:completionHandler];
+    [MSDataStore deleteDocumentWithPartition:partition documentId:documentId completionHandler:completionHandler];
     
+    [self waitForExpectationsWithTimeout:5 handler:nil];
     
-     [self waitForExpectationsWithTimeout:5
-                                    handler:^(NSError *error) {
-                                        XCTAssertTrue(completionHandler);
-                                        if (error) {
-                                            XCTFail(@"Expectation Failed with error: %@", error);
-                                        }
-                                    }];
-
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
     XCTAssertTrue(completionHandlerCalled);
 }
 
-- (void) testDeleteDocumentWithPartitionWithWriteOptions {
+- (void)testDeleteDocumentWithPartitionWithWriteOptions {
     
     // If
     NSString *partition = @"partition";
@@ -206,18 +183,9 @@
     };
     
     // When
-    [MSDataStore deleteDocumentWithPartition:partition
-                                  documentId:documentId
-                                writeOptions:options
-                           completionHandler:completionHandler];
+    [MSDataStore deleteDocumentWithPartition:partition documentId:documentId writeOptions:options completionHandler:completionHandler];
     
-    [self waitForExpectationsWithTimeout:5
-                                handler:^(NSError *error) {
-                                    XCTAssertTrue(completionHandler);
-                                    if (error) {
-                                        XCTFail(@"Expectation Failed with error: %@", error);
-                                    }
-                                }];
+    [self waitForExpectationsWithTimeout:5 handler:nil];
     
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
