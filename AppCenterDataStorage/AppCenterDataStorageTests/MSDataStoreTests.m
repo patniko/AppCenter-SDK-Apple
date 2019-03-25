@@ -61,9 +61,10 @@
     //If
     NSString *partition = @"partition";
     NSString *documentId = @"documentId";
+    NSDictionary *docDic = @{@"testKey" : @"testValue"};
    
     id mockSerializableDocument = OCMProtocolMock(@protocol(MSSerializableDocument));
-    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn([NSDictionary new]);
+    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn(docDic);
 
      __block BOOL completionHandlerCalled = NO;
     XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
@@ -78,7 +79,13 @@
                             document:mockSerializableDocument
                    completionHandler:completionHandler];
     
-    [self waitForExpectationsWithTimeout:5 handler:nil];
+    [self waitForExpectationsWithTimeout:5
+                                handler:^(NSError *error) {
+                                    XCTAssertTrue(completionHandler);
+                                    if (error) {
+                                        XCTFail(@"Expectation Failed with error: %@", error);
+                                    }
+                                }];
     
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
@@ -87,6 +94,40 @@
 }
 
 - (void)testCreateWithPartitionWithWriteOptionsGoldenTest {
+    
+    //If
+    NSString *partition = @"partition";
+    NSString *documentId = @"documentId";
+    NSDictionary *docDic = @{@"testKey" : @"testValue"};
+    MSWriteOptions *options = [MSWriteOptions new];
+    
+    id mockSerializableDocument = OCMProtocolMock(@protocol(MSSerializableDocument));
+    OCMStub([mockSerializableDocument serializeToDictionary]).andReturn(docDic);
+    
+    __block BOOL completionHandlerCalled = NO;
+    XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
+    MSDocumentWrapperCompletionHandler completionHandler = ^(__unused MSDocumentWrapper *data) {
+        completionHandlerCalled = YES;
+        [completeExpectation fulfill];
+    };
+    
+    // When
+    [MSDataStore createWithPartition:partition
+                          documentId:documentId
+                            document:mockSerializableDocument
+                        writeOptions:options
+                   completionHandler:completionHandler];
+    
+    [self waitForExpectationsWithTimeout:30
+                                 handler:nil];
+    
+    // Then
+    XCTAssertTrue([completeExpectation assertForOverFulfill]);
+    XCTAssertTrue(completionHandlerCalled);
+    
+}
+
+- (void)testCreateWithPartitionExchangeFailed {
     
     //If
     NSString *partition = @"partition";
@@ -100,7 +141,7 @@
     XCTestExpectation *completeExpectation = [self expectationWithDescription:@"Task finished"];
     MSDocumentWrapperCompletionHandler completionHandler = ^(MSDocumentWrapper *data) {
         completionHandlerCalled = YES;
-        [completionHandler fulfill];
+        [completeExpectation fulfill];
     };
     
     // When
@@ -110,12 +151,12 @@
                         writeOptions:options
                    completionHandler:completionHandler];
     
-    [self waitForExpectationsWithTimeout:5 handler:nil];
+    [self waitForExpectationsWithTimeout:5
+                                 handler:nil];
     
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
     XCTAssertTrue(completionHandlerCalled);
-    
 }
 
 - (void) testDeleteDocumentWithPartitionWithoutWriteOptions {
@@ -137,8 +178,14 @@
                                             completionHandler:completionHandler];
     
     
-    [self waitForExpectationsWithTimeout:5 handler:nil];
-    
+     [self waitForExpectationsWithTimeout:5
+                                    handler:^(NSError *error) {
+                                        XCTAssertTrue(completionHandler);
+                                        if (error) {
+                                            XCTFail(@"Expectation Failed with error: %@", error);
+                                        }
+                                    }];
+
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
     XCTAssertTrue(completionHandlerCalled);
@@ -164,8 +211,13 @@
                                 writeOptions:options
                            completionHandler:completionHandler];
     
-    
-    [self waitForExpectationsWithTimeout:5 handler:nil];
+    [self waitForExpectationsWithTimeout:5
+                                handler:^(NSError *error) {
+                                    XCTAssertTrue(completionHandler);
+                                    if (error) {
+                                        XCTFail(@"Expectation Failed with error: %@", error);
+                                    }
+                                }];
     
     // Then
     XCTAssertTrue([completeExpectation assertForOverFulfill]);
